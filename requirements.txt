@@ -1,0 +1,10 @@
+# External dependencies for the AI Video Course Analyzer
+#
+# Install these packages into your Python environment before running
+# ``main.py``. You can do this with:
+#
+#     pip install -r requirements.txt
+#
+requests>=2.0.0
+# moviepy is optional and used only if you implement audio extraction
+moviepy>=1.0.3

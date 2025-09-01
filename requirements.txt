@@ -4,7 +4,8 @@
 # ``main.py``. You can do this with:
 #
 #     pip install -r requirements.txt
-#
+
 requests>=2.0.0
-# moviepy is optional and used only if you implement audio extraction
+# moviepy is required for audio extraction/transcription features
 moviepy>=1.0.3
+

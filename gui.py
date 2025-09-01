@@ -182,6 +182,14 @@ class VideoAnalyzerApp:
                         text_path = entry["text"]
 
                         self._log(f"Phân tích video: {os.path.basename(video_path)}")
+
+                        # Acquire an API key upfront so it can be reused for
+                        # both transcription and analysis calls.
+                        key = api_manager.get_active_key()
+                        if not key:
+                            self._log("Hết API key hoạt động. Dừng phân tích.")
+                            return
+
                         # Collect text content
                         content_parts: List[str] = []
                         if subtitle_path:
@@ -189,8 +197,11 @@ class VideoAnalyzerApp:
                         if text_path and text_path != subtitle_path:
                             content_parts.append(read_text_file(text_path))
                         if not content_parts:
-                            # Fall back to audio transcription stub
-                            content_parts.append(extract_audio_and_transcribe(video_path))
+                            transcript = extract_audio_and_transcribe(video_path, key)
+                            if transcript:
+                                content_parts.append(transcript)
+                            else:
+                                self._log(f"Không thể trích xuất âm thanh cho video: {video_path}")
                         combined_content = "\n".join(content_parts)
 
                         # Compose prompt
@@ -198,11 +209,6 @@ class VideoAnalyzerApp:
                         if extra_prompt:
                             prompt += f"\n\n{extra_prompt}"
 
-                        # Get an API key
-                        key = api_manager.get_active_key()
-                        if not key:
-                            self._log("Hết API key hoạt động. Dừng phân tích.")
-                            return
                         try:
                             response = call_api(prompt, key)
                             # Check for token limit marker in response; this is heuristic

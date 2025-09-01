@@ -19,9 +19,14 @@ import tkinter as tk
 from tkinter import filedialog, messagebox
 from tkinter import scrolledtext
 
-from .directory_scanner import scan_course_folder
-from .file_processor import read_text_file, extract_audio_and_transcribe
-from .api_handler import ApiManager, call_api
+try:  # Support running as a script or module
+    from .directory_scanner import scan_course_folder
+    from .file_processor import read_text_file, extract_audio_and_transcribe
+    from .api_handler import ApiManager, call_api
+except ImportError:  # pragma: no cover - fallback for direct execution
+    from directory_scanner import scan_course_folder
+    from file_processor import read_text_file, extract_audio_and_transcribe
+    from api_handler import ApiManager, call_api
 
 
 class VideoAnalyzerApp:

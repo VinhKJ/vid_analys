@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import tkinter as tk
 
-from .gui import VideoAnalyzerApp
+try:  # Allow running as a script or a module
+    from .gui import VideoAnalyzerApp
+except ImportError:  # pragma: no cover - fallback for direct execution
+    from gui import VideoAnalyzerApp
 
 
 def main() -> None:

@@ -3,9 +3,9 @@
 This module defines a simple API manager that can rotate through a list
 of provided API keys. If one key exceeds its daily usage limit, it can
 be disabled and the next available key will be used. The
-`call_api` function is a stub meant to be replaced with actual logic to
-contact your AI analysis service (e.g. AI Studio). It returns a mock
-response for demonstration purposes.
+``call_api`` function communicates with the Google AI Studio
+Generative Language API (Gemini) to analyse text prompts and return the
+generated response.
 """
 
 from __future__ import annotations
@@ -55,42 +55,48 @@ class ApiManager:
 
 
 def call_api(prompt: str, api_key: str) -> str:
-    """Send a prompt to the AI analysis API and return its response.
+    """Send a prompt to Gemini and return its textual response.
 
     Parameters
     ----------
-    prompt: str
+    prompt:
         The constructed prompt to send to the AI service.
-    api_key: str
-        The API key to use for authentication.
+    api_key:
+        Google AI Studio API key used for authentication.
 
     Returns
     -------
     str
-        The AI's response as plain text.
-
-    Notes
-    -----
-    The current implementation is a stub and merely returns a truncated
-    version of the prompt for demonstration. Replace this with actual
-    requests to your service endpoint. For example:
-
-    .. code-block:: python
-
-        url = "https://api.ai-studio.com/v1/analyse"
-        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
-        payload = {"prompt": prompt}
-        response = requests.post(url, json=payload, headers=headers, timeout=30)
-        response.raise_for_status()
-        return response.json().get("analysis", "")
-
-    Handle HTTP errors, token limit errors, and other exceptions as
-    appropriate for your API provider. If the API indicates the request
-    exceeded allowed tokens, raise an exception or return a special
-    marker string so that the caller can log the issue.
+        The AI's response as plain text. If the service reports that the
+        request exceeded the token limit, the string ``"TOKEN_LIMIT"`` is
+        returned so the caller can react accordingly.
     """
+
     logging.debug("call_api invoked with key %s", api_key)
-    # TODO: Replace the following with actual API interaction. This is
-    # currently a placeholder that returns part of the prompt for
-    # demonstration and testing of the GUI.
-    return f"[Mô phỏng phân tích với khóa {api_key[:4]}]: {prompt[:200]}..."
+
+    url = (
+        "https://generativelanguage.googleapis.com/v1beta/models/"
+        "gemini-pro:generateContent?key=" + api_key
+    )
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.2},
+    }
+
+    try:
+        response = requests.post(url, json=payload, timeout=60)
+        # Gemini returns 400 when the prompt is too large
+        if response.status_code == 400 and "too long" in response.text.lower():
+            logging.warning("Token limit exceeded for request")
+            return "TOKEN_LIMIT"
+        if response.status_code in {401, 403}:
+            raise PermissionError("Invalid API key")
+        response.raise_for_status()
+        data = response.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except requests.exceptions.RequestException as exc:
+        logging.error("API request failed: %s", exc)
+        raise
+    except (KeyError, IndexError) as exc:
+        logging.error("Unexpected API response format: %s", exc)
+        raise RuntimeError("Malformed API response") from exc

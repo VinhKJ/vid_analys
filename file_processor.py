@@ -1,17 +1,19 @@
 """Helper functions for reading subtitles and extracting text from media files.
 
-This module contains simple utility functions that read the contents of
+This module contains utility functions for reading the contents of
 subtitle or text files associated with videos. If no subtitle is
-available, it also includes stubs for audio extraction and
-transcription. These can be expanded in the future to perform actual
-speech‑to‑text conversion using libraries like MoviePy and Whisper.
+available, it can extract the audio track from the video and send it to
+the Google AI Studio Generative Language API to obtain a transcript.
 """
 
 from __future__ import annotations
 
+import base64
 import logging
 import os
-from typing import Optional
+import tempfile
+
+import requests  # type: ignore
 
 
 def read_text_file(file_path: str) -> str:
@@ -38,28 +40,65 @@ def read_text_file(file_path: str) -> str:
         return ""
 
 
-def extract_audio_and_transcribe(video_path: str) -> str:
-    """Stub for extracting audio from a video file and transcribing it.
-
-    This function is a placeholder for more advanced functionality such
-    as using MoviePy to extract the audio track from the video and
-    sending it to a speech‑to‑text engine (for example, OpenAI's
-    Whisper API). Currently it returns an empty string.
+def extract_audio_and_transcribe(video_path: str, api_key: str) -> str:
+    """Extract audio from a video file and transcribe it using Gemini.
 
     Parameters
     ----------
     video_path: str
-        The full path to the .mp4 file.
+        The full path to the ``.mp4`` file.
+    api_key: str
+        API key used to authenticate with the transcription service.
 
     Returns
     -------
     str
-        The transcribed text extracted from the video. Always returns
-        an empty string in this stub implementation.
+        The transcribed text. If an error occurs during extraction or
+        transcription, an empty string is returned.
     """
-    logging.info("Audio extraction and transcription not implemented. Skipping audio for '%s'", video_path)
-    # In a real implementation you might use moviepy VideoFileClip to extract
-    # the audio and whisper to transcribe it. For now we return an empty
-    # string so that the analysis can proceed using only subtitles or
-    # accompanying text files.
+
+    logging.info("Extracting and transcribing audio for '%s'", video_path)
+    try:
+        from moviepy import VideoFileClip  # Local import to avoid heavy dependency when unused
+
+        with VideoFileClip(video_path) as clip:
+            if clip.audio is None:
+                logging.warning("No audio track found in '%s'", video_path)
+                return ""
+            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp:
+                tmp_path = tmp.name
+                clip.audio.write_audiofile(tmp_path, logger=None)
+
+        with open(tmp_path, "rb") as audio_file:
+            audio_b64 = base64.b64encode(audio_file.read()).decode("utf-8")
+        os.unlink(tmp_path)
+
+        url = (
+            "https://generativelanguage.googleapis.com/v1beta/models/"
+            "gemini-1.5-flash:generateContent?key=" + api_key
+        )
+        payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {"text": "Transcribe the provided audio."},
+                        {"inline_data": {"mime_type": "audio/mp3", "data": audio_b64}},
+                    ]
+                }
+            ]
+        }
+
+        response = requests.post(url, json=payload, timeout=300)
+        if response.status_code in {401, 403}:
+            raise PermissionError("Invalid API key for transcription")
+        response.raise_for_status()
+        result = (
+            response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        )
+        logging.debug("Transcription obtained with length %d", len(result))
+        return result
+    except requests.exceptions.RequestException as exc:
+        logging.error("Transcription request failed: %s", exc)
+    except Exception as exc:  # pragma: no cover - broad catch to log unexpected errors
+        logging.error("Audio extraction/transcription failed for '%s': %s", video_path, exc)
     return ""

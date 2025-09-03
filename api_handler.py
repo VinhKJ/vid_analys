@@ -13,7 +13,9 @@ from __future__ import annotations
 import logging
 from typing import List, Optional
 
-import requests  # type: ignore
+# ``google-genai`` is imported lazily inside ``call_api`` so that the module
+# can be imported even if the dependency is missing (e.g. in minimal test
+# environments). The real client will be loaded when ``call_api`` is invoked.
 
 
 class ApiManager:
@@ -74,29 +76,29 @@ def call_api(prompt: str, api_key: str) -> str:
 
     logging.debug("call_api invoked with key %s", api_key)
 
-    url = (
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-pro:generateContent?key=" + api_key
-    )
-    payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.2},
-    }
-
     try:
-        response = requests.post(url, json=payload, timeout=60)
-        # Gemini returns 400 when the prompt is too large
-        if response.status_code == 400 and "too long" in response.text.lower():
+        from google import genai
+        from google.genai import types
+    except Exception as exc:  # pragma: no cover - handled at runtime
+        raise RuntimeError("google-genai library is required") from exc
+
+    client = genai.Client(api_key=api_key)
+    try:
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=0.2,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        return response.text.strip()
+    except Exception as exc:  # pragma: no cover - depends on external API
+        message = str(exc).lower()
+        if "api key" in message and "invalid" in message:
+            raise PermissionError("Invalid API key") from exc
+        if "too long" in message or "token" in message:
             logging.warning("Token limit exceeded for request")
             return "TOKEN_LIMIT"
-        if response.status_code in {401, 403}:
-            raise PermissionError("Invalid API key")
-        response.raise_for_status()
-        data = response.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except requests.exceptions.RequestException as exc:
         logging.error("API request failed: %s", exc)
         raise
-    except (KeyError, IndexError) as exc:
-        logging.error("Unexpected API response format: %s", exc)
-        raise RuntimeError("Malformed API response") from exc

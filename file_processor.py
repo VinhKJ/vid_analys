@@ -8,12 +8,9 @@ the Google AI Studio Generative Language API to obtain a transcript.
 
 from __future__ import annotations
 
-import base64
 import logging
 import os
 import tempfile
-
-import requests  # type: ignore
 
 
 def read_text_file(file_path: str) -> str:
@@ -70,35 +67,29 @@ def extract_audio_and_transcribe(video_path: str, api_key: str) -> str:
                 clip.audio.write_audiofile(tmp_path, logger=None)
 
         with open(tmp_path, "rb") as audio_file:
-            audio_b64 = base64.b64encode(audio_file.read()).decode("utf-8")
+            audio_bytes = audio_file.read()
         os.unlink(tmp_path)
 
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-1.5-flash:generateContent?key=" + api_key
-        )
-        payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {"text": "Transcribe the provided audio."},
-                        {"inline_data": {"mime_type": "audio/mp3", "data": audio_b64}},
-                    ]
-                }
-            ]
-        }
+        try:
+            from google import genai
+            from google.genai import types
+        except Exception as exc:  # pragma: no cover - handled at runtime
+            raise RuntimeError("google-genai library is required") from exc
 
-        response = requests.post(url, json=payload, timeout=300)
-        if response.status_code in {401, 403}:
-            raise PermissionError("Invalid API key for transcription")
-        response.raise_for_status()
-        result = (
-            response.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        client = genai.Client(api_key=api_key)
+        audio_part = types.Part.from_bytes(audio_bytes, mime_type="audio/mp3")
+        prompt_part = types.Part.from_text("Transcribe the provided audio.")
+
+        response = client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=[types.Content(role="user", parts=[prompt_part, audio_part])],
         )
+        result = response.text.strip()
         logging.debug("Transcription obtained with length %d", len(result))
         return result
-    except requests.exceptions.RequestException as exc:
-        logging.error("Transcription request failed: %s", exc)
-    except Exception as exc:  # pragma: no cover - broad catch to log unexpected errors
+    except Exception as exc:  # pragma: no cover - network and other errors
+        message = str(exc).lower()
+        if "api key" in message and "invalid" in message:
+            raise PermissionError("Invalid API key for transcription") from exc
         logging.error("Audio extraction/transcription failed for '%s': %s", video_path, exc)
-    return ""
+        return ""

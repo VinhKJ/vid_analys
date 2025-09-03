@@ -8,4 +8,6 @@
 requests>=2.0.0
 # moviepy is required for audio extraction/transcription features
 moviepy>=1.0.3
+# google-genai provides the Gemini client used for analysis and transcription
+google-genai>=0.1.0
 
